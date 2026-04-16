@@ -1,6 +1,6 @@
 #!/bin/bash
 # DeckBox installer — run this on your Steam Deck in Desktop Mode (Konsole)
-# Usage: curl -L https://github.com/user/DeckBox/releases/latest/download/install.sh | sh
+# Usage: curl -L https://github.com/user/DeckBox/releases/latest/download/install.sh | bash
 
 set -e
 
