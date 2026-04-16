@@ -46,7 +46,7 @@ This downloads the plugin, extracts it to the correct folder, and restarts Decky
 
 ### Install manually
 
-1. Download `DeckBox.zip` from [Releases](https://github.com/user/DeckBox/releases)
+1. Download `DeckBox.zip` from [Releases](https://github.com/D3FVLT/DeckBox/releases)
 2. Extract to `~/homebrew/plugins/` so the folder structure is `~/homebrew/plugins/DeckBox/`
 3. Restart Decky: `sudo systemctl restart plugin_loader.service`
 

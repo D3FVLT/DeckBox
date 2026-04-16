@@ -1,15 +1,15 @@
 #!/bin/bash
 # DeckBox installer — run this on your Steam Deck in Desktop Mode (Konsole)
-# Usage: curl -L https://github.com/user/DeckBox/releases/latest/download/install.sh | bash
+# Usage: curl -L https://github.com/D3FVLT/DeckBox/releases/latest/download/install.sh | bash
 
 set -e
 
 PLUGIN_DIR="${HOME}/homebrew/plugins"
-RELEASE_URL="https://github.com/user/DeckBox/releases/latest/download/DeckBox.zip"
+RELEASE_URL="https://github.com/D3FVLT/DeckBox/releases/latest/download/DeckBox.zip"
 TMP_ZIP="/tmp/DeckBox.zip"
 
 echo "[DeckBox] Downloading plugin..."
-curl -L -o "$TMP_ZIP" "$RELEASE_URL"
+curl -fL -o "$TMP_ZIP" "$RELEASE_URL" || { echo "[DeckBox] ERROR: Download failed. Check the URL or your internet connection."; exit 1; }
 
 echo "[DeckBox] Installing to ${PLUGIN_DIR}/DeckBox ..."
 rm -rf "${PLUGIN_DIR}/DeckBox"
