@@ -39,7 +39,7 @@ This downloads the plugin, extracts it to the correct folder, and restarts Decky
 2. Paste the release ZIP URL into "Install plugin from URL":
 
    ```
-   https://github.com/user/DeckBox/releases/latest/download/DeckBox.zip
+   https://github.com/D3FVLT/DeckBox/releases/latest/download/DeckBox.zip
    ```
 
 3. Wait for it to finish, then restart Decky if needed
