@@ -24,7 +24,7 @@ Think nekoray / Throne, but for Gaming Mode. Add your VLESS keys, connect with o
 Open **Konsole** in Desktop Mode and run:
 
 ```bash
-curl -L https://github.com/user/DeckBox/releases/latest/download/install.sh | sh
+curl -L https://github.com/D3FVLT/DeckBox/releases/latest/download/install.sh | sh
 ```
 
 This downloads the plugin, extracts it to the correct folder, and restarts Decky automatically.
