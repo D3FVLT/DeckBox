@@ -340,11 +340,14 @@ class Plugin:
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-L", "-o", tar_path, url,
+                "curl", "-fL", "--connect-timeout", "10", "--max-time", "120",
+                "-o", tar_path, url,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await proc.communicate()
+            _, stderr_data = await proc.communicate()
+            if proc.returncode != 0:
+                return {"error": f"Download failed: {stderr_data.decode()[:300]}"}
 
             proc = await asyncio.create_subprocess_exec(
                 "tar", "xzf", tar_path, "-C", bin_dir, "--strip-components=1",
@@ -352,10 +355,13 @@ class Plugin:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await proc.communicate()
+            _, stderr_data = await proc.communicate()
+            if proc.returncode != 0:
+                return {"error": f"Extract failed: {stderr_data.decode()[:300]}"}
 
             os.chmod(SINGBOX_BIN, 0o755)
-            os.remove(tar_path)
+            if os.path.exists(tar_path):
+                os.remove(tar_path)
 
             return await self.check_binary()
         except Exception as e:
