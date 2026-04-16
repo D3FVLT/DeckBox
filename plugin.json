@@ -1,0 +1,11 @@
+{
+  "name": "DeckBox",
+  "author": "D3FVLT",
+  "flags": ["_root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["proxy", "vpn", "vless", "network"],
+    "description": "VLESS/Reality proxy client for Steam Deck. Add proxy keys, run local SOCKS proxy or TUN mode.",
+    "image": "https://raw.githubusercontent.com/D3FVLT/deckbox/main/assets/logo.png"
+  }
+}

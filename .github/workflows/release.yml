@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm i
+      - run: pnpm run build
+
+      - name: Package plugin
+        run: |
+          mkdir -p /tmp/DeckBox
+          cp -r dist main.py plugin.json package.json /tmp/DeckBox/
+          mkdir -p /tmp/DeckBox/backend
+          cp backend/install_singbox.sh /tmp/DeckBox/backend/
+          cd /tmp && zip -r DeckBox.zip DeckBox/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /tmp/DeckBox.zip
+          generate_release_notes: true
