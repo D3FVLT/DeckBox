@@ -278,11 +278,10 @@ class Plugin:
 
         try:
             if settings["tun_mode"]:
-                subprocess.run(
-                    ["setcap", "cap_net_admin,cap_net_bind_service,cap_net_raw+ep", SINGBOX_BIN],
-                    capture_output=True, timeout=5,
-                )
-            cmd = [SINGBOX_BIN, "run", "-c", CONFIG_PATH]
+                subprocess.run(["modprobe", "tun"], capture_output=True, timeout=5)
+                cmd = ["sudo", "-n", SINGBOX_BIN, "run", "-c", CONFIG_PATH]
+            else:
+                cmd = [SINGBOX_BIN, "run", "-c", CONFIG_PATH]
             self.log_file = open(LOG_PATH, "w")
             self.singbox_process = subprocess.Popen(
                 cmd,
@@ -306,12 +305,17 @@ class Plugin:
             return {"ok": True, "was_running": False}
 
         try:
-            self.singbox_process.send_signal(signal.SIGTERM)
+            pid = self.singbox_process.pid
             try:
+                self.singbox_process.terminate()
                 self.singbox_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.singbox_process.kill()
-                self.singbox_process.wait(timeout=3)
+                subprocess.run(["sudo", "-n", "kill", "-9", str(pid)], capture_output=True, timeout=3)
+                subprocess.run(["pkill", "-9", "-f", "sing-box run"], capture_output=True, timeout=3)
+                try:
+                    self.singbox_process.wait(timeout=3)
+                except Exception:
+                    pass
             decky.logger.info("sing-box stopped")
         except Exception as e:
             decky.logger.error(f"Error stopping sing-box: {e}")
@@ -341,6 +345,25 @@ class Plugin:
             return {"logs": "".join(tail)}
         except Exception as e:
             return {"logs": f"Error reading logs: {e}"}
+
+    async def setup_tun_permissions(self) -> dict:
+        """Create sudoers entry so sing-box can run as root without password for TUN mode."""
+        sudoers_line = f"deck ALL=(root) NOPASSWD: {SINGBOX_BIN}\n"
+        sudoers_path = "/etc/sudoers.d/deckbox"
+        try:
+            with open(sudoers_path, "w") as f:
+                f.write(sudoers_line)
+            os.chmod(sudoers_path, 0o440)
+            subprocess.run(["modprobe", "tun"], capture_output=True, timeout=5)
+            return {"ok": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def check_tun_permissions(self) -> dict:
+        sudoers_path = "/etc/sudoers.d/deckbox"
+        exists = os.path.isfile(sudoers_path)
+        tun_loaded = os.path.exists("/dev/net/tun")
+        return {"sudoers": exists, "tun_device": tun_loaded}
 
     async def check_binary(self) -> dict:
         exists = os.path.isfile(SINGBOX_BIN)

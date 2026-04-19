@@ -40,6 +40,12 @@ sudo mkdir -p "$PLUGIN_DIR"
 sudo mv "${TMP_DIR}/DeckBox" "${PLUGIN_DIR}/DeckBox"
 sudo chmod -R 755 "${PLUGIN_DIR}/DeckBox"
 
+# TUN mode support: sudoers entry for passwordless sing-box execution
+echo "[DeckBox] Configuring TUN mode permissions..."
+echo "deck ALL=(root) NOPASSWD: ${PLUGIN_DIR}/DeckBox/bin/sing-box" | sudo tee /etc/sudoers.d/deckbox > /dev/null
+sudo chmod 440 /etc/sudoers.d/deckbox
+sudo modprobe tun 2>/dev/null || true
+
 rm -rf "$TMP_DIR"
 
 # Restart Decky

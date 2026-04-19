@@ -51,6 +51,9 @@ const stopProxy = callable<[], { ok?: boolean }>("stop_proxy");
 const checkBinary = callable<[], { exists: boolean; version: string }>("check_binary");
 const installSingbox = callable<[], { exists?: boolean; version?: string; error?: string }>("install_singbox");
 const getLogs = callable<[lines: number], { logs: string }>("get_logs");
+const setupTunPermissions = callable<[], { ok?: boolean; error?: string }>("setup_tun_permissions");
+// @ts-ignore reserved for future use
+const _checkTunPermissions = callable<[], { sudoers: boolean; tun_device: boolean }>("check_tun_permissions");
 
 function StatusBadge({ running }: { running: boolean }) {
   return (
@@ -342,6 +345,23 @@ function Content() {
             onChange={handleToggleTun}
           />
         </PanelSectionRow>
+        {settings.tun_mode && (
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              onClick={async () => {
+                const result = await setupTunPermissions();
+                if (result.error) {
+                  toaster.toast({ title: "DeckBox", body: `Error: ${result.error}` });
+                } else {
+                  toaster.toast({ title: "DeckBox", body: "TUN permissions configured" });
+                }
+              }}
+            >
+              Setup TUN Permissions
+            </ButtonItem>
+          </PanelSectionRow>
+        )}
       </PanelSection>
 
       {/* Add Profile */}
