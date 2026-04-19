@@ -235,7 +235,7 @@ function Content() {
     } else {
       const result = await startProxy();
       if (result.error) {
-        toaster.toast({ title: "DeckBox", body: `Error: ${result.error}` });
+        toaster.toast({ title: "DeckBox Error", body: `${result.error}\nCheck View Logs for details.` });
       } else {
         toaster.toast({ title: "DeckBox", body: "Proxy started" });
       }

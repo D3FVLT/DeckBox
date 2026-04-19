@@ -253,12 +253,19 @@ class Plugin:
             "active_profile": settings["active_profile"],
         }
 
+    def _run_systemctl(self, action: str) -> subprocess.CompletedProcess:
+        """Run systemctl action, trying direct first (if root), then sudo -n."""
+        cmd_direct = ["systemctl", action, SYSTEMD_UNIT]
+        cmd_sudo = ["sudo", "-n", "systemctl", action, SYSTEMD_UNIT]
+        if os.geteuid() == 0:
+            r = subprocess.run(cmd_direct, capture_output=True, text=True, timeout=10)
+            if r.returncode == 0 or "password" not in r.stderr.lower():
+                return r
+        return subprocess.run(cmd_sudo, capture_output=True, text=True, timeout=10)
+
     def _is_service_active(self) -> bool:
         try:
-            r = subprocess.run(
-                ["sudo", "-n", "systemctl", "is-active", SYSTEMD_UNIT],
-                capture_output=True, text=True, timeout=5,
-            )
+            r = self._run_systemctl("is-active")
             return r.stdout.strip() == "active"
         except Exception:
             return False
@@ -295,13 +302,17 @@ class Plugin:
         try:
             if tun:
                 with open(LOG_PATH, "w") as f:
-                    f.write("")
-                r = subprocess.run(
-                    ["sudo", "-n", "systemctl", "start", SYSTEMD_UNIT],
-                    capture_output=True, text=True, timeout=10,
-                )
+                    f.write(f"[DeckBox] uid={os.getuid()} euid={os.geteuid()}\n")
+                    f.write(f"[DeckBox] Starting TUN mode via systemd...\n")
+                r = self._run_systemctl("start")
+                with open(LOG_PATH, "a") as f:
+                    f.write(f"[DeckBox] systemctl rc={r.returncode}\n")
+                    if r.stdout.strip():
+                        f.write(f"[DeckBox] stdout: {r.stdout}\n")
+                    if r.stderr.strip():
+                        f.write(f"[DeckBox] stderr: {r.stderr}\n")
                 if r.returncode != 0:
-                    return {"error": f"Failed to start service: {r.stderr[:300]}"}
+                    return {"error": f"Failed to start TUN. Check logs for details."}
                 await asyncio.sleep(1)
                 if not self._is_service_active():
                     with open(LOG_PATH, "r") as f:
@@ -331,7 +342,13 @@ class Plugin:
     async def stop_proxy(self) -> dict:
         stopped_service = False
         if self._is_service_active():
-            subprocess.run(["sudo", "-n", "systemctl", "stop", SYSTEMD_UNIT], capture_output=True, timeout=10)
+            r = self._run_systemctl("stop")
+            if r.returncode != 0:
+                try:
+                    with open(LOG_PATH, "a") as f:
+                        f.write(f"[DeckBox] stop failed rc={r.returncode} stderr={r.stderr}\n")
+                except Exception:
+                    pass
             stopped_service = True
             decky.logger.info("sing-box systemd service stopped")
 
@@ -442,7 +459,7 @@ class Plugin:
             return {"error": str(e)}
 
     async def _main(self):
-        decky.logger.info("DeckBox plugin loaded")
+        decky.logger.info(f"DeckBox plugin loaded uid={os.getuid()} euid={os.geteuid()}")
         os.makedirs(CONFIG_DIR, exist_ok=True)
 
     async def _unload(self):

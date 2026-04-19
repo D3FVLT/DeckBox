@@ -76,9 +76,16 @@ UNIT
 
 sudo systemctl daemon-reload
 
-# Allow deck user to start/stop the service without password
+# Allow deck user to start/stop the service without password and without TTY
 echo "[DeckBox] Configuring permissions..."
+SYSTEMCTL_PATH="$(which systemctl)"
+echo "[DeckBox] systemctl path: ${SYSTEMCTL_PATH}"
 sudo tee /etc/sudoers.d/deckbox > /dev/null <<SUDOERS
+Defaults:deck !requiretty
+deck ALL=(root) NOPASSWD: ${SYSTEMCTL_PATH} start deckbox-tun.service
+deck ALL=(root) NOPASSWD: ${SYSTEMCTL_PATH} stop deckbox-tun.service
+deck ALL=(root) NOPASSWD: ${SYSTEMCTL_PATH} restart deckbox-tun.service
+deck ALL=(root) NOPASSWD: ${SYSTEMCTL_PATH} is-active deckbox-tun.service
 deck ALL=(root) NOPASSWD: /usr/bin/systemctl start deckbox-tun.service
 deck ALL=(root) NOPASSWD: /usr/bin/systemctl stop deckbox-tun.service
 deck ALL=(root) NOPASSWD: /usr/bin/systemctl restart deckbox-tun.service
