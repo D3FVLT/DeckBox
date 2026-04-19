@@ -28,6 +28,7 @@ echo "[DeckBox] Extracting sing-box..."
 mkdir -p "${TMP_DIR}/DeckBox/bin"
 tar xzf "${TMP_DIR}/sing-box.tar.gz" -C "${TMP_DIR}/DeckBox/bin" --strip-components=1 "sing-box-${SINGBOX_VERSION}-linux-amd64/sing-box"
 chmod +x "${TMP_DIR}/DeckBox/bin/sing-box"
+sudo setcap cap_net_admin,cap_net_bind_service,cap_net_raw+ep "${TMP_DIR}/DeckBox/bin/sing-box" 2>/dev/null || true
 
 # Verify
 "${TMP_DIR}/DeckBox/bin/sing-box" version && echo "[DeckBox] sing-box OK" || { echo "[DeckBox] ERROR: sing-box binary broken."; exit 1; }

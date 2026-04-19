@@ -277,7 +277,8 @@ class Plugin:
             return {"error": "sing-box binary not found. Run install script first."}
 
         try:
-            cmd = [SINGBOX_BIN, "run", "-c", CONFIG_PATH]
+            tun = settings["tun_mode"]
+            cmd = ["sudo", SINGBOX_BIN, "run", "-c", CONFIG_PATH] if tun else [SINGBOX_BIN, "run", "-c", CONFIG_PATH]
             self.log_file = open(LOG_PATH, "w")
             self.singbox_process = subprocess.Popen(
                 cmd,
@@ -300,16 +301,21 @@ class Plugin:
             self.singbox_process = None
             return {"ok": True, "was_running": False}
 
+        pid = self.singbox_process.pid
         try:
             self.singbox_process.send_signal(signal.SIGTERM)
             try:
                 self.singbox_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.singbox_process.kill()
+                subprocess.run(["sudo", "kill", "-9", str(pid)], timeout=3)
                 self.singbox_process.wait(timeout=3)
             decky.logger.info("sing-box stopped")
         except Exception as e:
             decky.logger.error(f"Error stopping sing-box: {e}")
+            try:
+                subprocess.run(["sudo", "kill", "-9", str(pid)], timeout=3)
+            except Exception:
+                pass
         finally:
             self.singbox_process = None
             if hasattr(self, "log_file") and self.log_file and not self.log_file.closed:
