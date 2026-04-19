@@ -12,6 +12,7 @@ SINGBOX_BIN = os.path.join(decky.DECKY_PLUGIN_DIR, "bin", "sing-box")
 CONFIG_DIR = decky.DECKY_PLUGIN_SETTINGS_DIR
 CONFIG_PATH = os.path.join(CONFIG_DIR, "sing-box-config.json")
 PROFILES_PATH = os.path.join(CONFIG_DIR, "profiles.json")
+LOG_PATH = os.path.join(CONFIG_DIR, "sing-box.log")
 
 
 def parse_vless_uri(uri: str) -> dict:
@@ -157,7 +158,7 @@ def build_singbox_config(profile: dict, listen_port: int = 2080, tun_mode: bool 
     }
 
     config = {
-        "log": {"level": "warn"},
+        "log": {"level": "info", "timestamp": True},
         "dns": dns_config,
         "inbounds": inbounds,
         "outbounds": outbounds,
@@ -277,14 +278,17 @@ class Plugin:
 
         try:
             cmd = [SINGBOX_BIN, "run", "-c", CONFIG_PATH]
+            self.log_file = open(LOG_PATH, "w")
             self.singbox_process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=self.log_file,
+                stderr=self.log_file,
             )
             await asyncio.sleep(1)
             if self.singbox_process.poll() is not None:
-                stderr = self.singbox_process.stderr.read().decode() if self.singbox_process.stderr else ""
+                self.log_file.close()
+                with open(LOG_PATH, "r") as f:
+                    stderr = f.read()
                 return {"error": f"sing-box exited immediately: {stderr[:500]}"}
             decky.logger.info(f"sing-box started, pid={self.singbox_process.pid}")
             return {"ok": True, "pid": self.singbox_process.pid}
@@ -308,12 +312,30 @@ class Plugin:
             decky.logger.error(f"Error stopping sing-box: {e}")
         finally:
             self.singbox_process = None
+            if hasattr(self, "log_file") and self.log_file and not self.log_file.closed:
+                self.log_file.close()
 
         return {"ok": True, "was_running": True}
 
     async def restart_proxy(self) -> dict:
         await self.stop_proxy()
         return await self.start_proxy()
+
+    async def get_logs(self, lines: int = 50) -> dict:
+        try:
+            if not os.path.exists(LOG_PATH):
+                return {"logs": "No logs yet. Connect to a server first."}
+            max_read = 256 * 1024
+            size = os.path.getsize(LOG_PATH)
+            with open(LOG_PATH, "r") as f:
+                if size > max_read:
+                    f.seek(size - max_read)
+                    f.readline()
+                all_lines = f.readlines()
+            tail = all_lines[-lines:]
+            return {"logs": "".join(tail)}
+        except Exception as e:
+            return {"logs": f"Error reading logs: {e}"}
 
     async def check_binary(self) -> dict:
         exists = os.path.isfile(SINGBOX_BIN)

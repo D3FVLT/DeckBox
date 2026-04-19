@@ -7,14 +7,16 @@ import {
   DropdownItem,
   Focusable,
   DialogButton,
+  ModalRoot,
   staticClasses,
+  showModal,
 } from "@decky/ui";
 import {
   callable,
   definePlugin,
   toaster,
 } from "@decky/api";
-import { useEffect, useState } from "react";
+import { useEffect, useState, FC } from "react";
 import { VscDebugDisconnect } from "react-icons/vsc";
 
 interface Profile {
@@ -48,6 +50,7 @@ const startProxy = callable<[], { ok?: boolean; error?: string; pid?: number }>(
 const stopProxy = callable<[], { ok?: boolean }>("stop_proxy");
 const checkBinary = callable<[], { exists: boolean; version: string }>("check_binary");
 const installSingbox = callable<[], { exists?: boolean; version?: string; error?: string }>("install_singbox");
+const getLogs = callable<[lines: number], { logs: string }>("get_logs");
 
 function StatusBadge({ running }: { running: boolean }) {
   return (
@@ -65,6 +68,94 @@ function StatusBadge({ running }: { running: boolean }) {
   );
 }
 
+const AddServerModal: FC<{ closeModal?: () => void; onAdd: (uri: string) => void }> = ({ closeModal, onAdd }) => {
+  const [uri, setUri] = useState("");
+
+  return (
+    <ModalRoot closeModal={closeModal}>
+      <div style={{ padding: "16px", minWidth: 400 }}>
+        <h3 style={{ marginBottom: 16 }}>Add VLESS Server</h3>
+        <TextField
+          label="VLESS Link"
+          description="vless://..."
+          value={uri}
+          onChange={(e) => setUri(e.target.value)}
+          focusOnMount={true}
+          bShowClearAction={true}
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <DialogButton onClick={closeModal} style={{ minWidth: 100 }}>
+            Cancel
+          </DialogButton>
+          <DialogButton
+            onClick={() => {
+              if (uri.trim()) {
+                onAdd(uri);
+                closeModal?.();
+              }
+            }}
+            disabled={!uri.trim()}
+            style={{ minWidth: 100 }}
+          >
+            Add
+          </DialogButton>
+        </div>
+      </div>
+    </ModalRoot>
+  );
+};
+
+const LogsModal: FC<{ closeModal?: () => void }> = ({ closeModal }) => {
+  const [logs, setLogs] = useState("Loading...");
+
+  const fetchLogs = async () => {
+    const result = await getLogs(80);
+    setLogs(result.logs);
+  };
+
+  useEffect(() => {
+    fetchLogs();
+    const interval = setInterval(fetchLogs, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <ModalRoot closeModal={closeModal}>
+      <div style={{ padding: "16px", minWidth: 500, maxHeight: "70vh", display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h3 style={{ margin: 0 }}>sing-box Logs</h3>
+          <DialogButton onClick={fetchLogs} style={{ minWidth: "auto", padding: "4px 12px", fontSize: 12 }}>
+            Refresh
+          </DialogButton>
+        </div>
+        <pre
+          style={{
+            flex: 1,
+            overflow: "auto",
+            backgroundColor: "#1a1a2e",
+            color: "#c8c8c8",
+            padding: 12,
+            borderRadius: 6,
+            fontSize: 11,
+            lineHeight: 1.5,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+            maxHeight: "55vh",
+            margin: 0,
+          }}
+        >
+          {logs}
+        </pre>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+          <DialogButton onClick={closeModal} style={{ minWidth: 100 }}>
+            Close
+          </DialogButton>
+        </div>
+      </div>
+    </ModalRoot>
+  );
+};
+
 function Content() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [settings, setSettingsState] = useState<Settings>({
@@ -78,7 +169,6 @@ function Content() {
     listen_port: 2080,
     active_profile: -1,
   });
-  const [newUri, setNewUri] = useState("");
   const [binaryInfo, setBinaryInfo] = useState<{ exists: boolean; version: string }>({
     exists: false,
     version: "",
@@ -108,18 +198,23 @@ function Content() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleAddProfile = async () => {
-    if (!newUri.trim()) return;
+  const handleAddProfile = async (uri: string) => {
+    if (!uri.trim()) return;
     setLoading(true);
-    const result = await addProfile(newUri.trim());
+    const result = await addProfile(uri.trim());
     if (result.error) {
       toaster.toast({ title: "DeckBox", body: `Error: ${result.error}` });
     } else {
       toaster.toast({ title: "DeckBox", body: "Profile added" });
-      setNewUri("");
     }
     await refresh();
     setLoading(false);
+  };
+
+  const openAddServerModal = () => {
+    showModal(
+      <AddServerModal onAdd={handleAddProfile} />,
+    );
   };
 
   const handleRemove = async (index: number) => {
@@ -252,15 +347,8 @@ function Content() {
       {/* Add Profile */}
       <PanelSection title="Add Server">
         <PanelSectionRow>
-          <TextField
-            label="VLESS Link"
-            value={newUri}
-            onChange={(e) => setNewUri(e.target.value)}
-          />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ButtonItem layout="below" disabled={loading || !newUri.trim()} onClick={handleAddProfile}>
-            Add
+          <ButtonItem layout="below" disabled={loading} onClick={openAddServerModal}>
+            Add Server
           </ButtonItem>
         </PanelSectionRow>
       </PanelSection>
@@ -327,6 +415,14 @@ function Content() {
             </ButtonItem>
           </PanelSectionRow>
         )}
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={() => showModal(<LogsModal />)}
+          >
+            View Logs
+          </ButtonItem>
+        </PanelSectionRow>
       </PanelSection>
     </>
   );
