@@ -13,6 +13,8 @@ CONFIG_DIR = decky.DECKY_PLUGIN_SETTINGS_DIR
 CONFIG_PATH = os.path.join(CONFIG_DIR, "sing-box-config.json")
 PROFILES_PATH = os.path.join(CONFIG_DIR, "profiles.json")
 LOG_PATH = os.path.join(CONFIG_DIR, "sing-box.log")
+SYSTEMD_UNIT = "deckbox-tun.service"
+SYSTEMD_UNIT_PATH = f"/etc/systemd/system/{SYSTEMD_UNIT}"
 
 
 def parse_vless_uri(uri: str) -> dict:
@@ -242,20 +244,50 @@ class Plugin:
         return {"ok": True}
 
     async def get_status(self) -> dict:
-        running = self.singbox_process is not None and self.singbox_process.poll() is None
+        proc_running = self.singbox_process is not None and self.singbox_process.poll() is None
+        svc_running = self._is_service_active()
         settings = load_settings()
         return {
-            "running": running,
+            "running": proc_running or svc_running,
             "tun_mode": settings["tun_mode"],
             "listen_port": settings["listen_port"],
             "active_profile": settings["active_profile"],
         }
 
+    def _install_systemd_unit(self):
+        unit_content = f"""[Unit]
+Description=DeckBox sing-box TUN proxy
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart={SINGBOX_BIN} run -c {CONFIG_PATH}
+StandardOutput=append:{LOG_PATH}
+StandardError=append:{LOG_PATH}
+Restart=no
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+"""
+        with open(SYSTEMD_UNIT_PATH, "w") as f:
+            f.write(unit_content)
+        subprocess.run(["systemctl", "daemon-reload"], capture_output=True, timeout=10)
+
+    def _is_service_active(self) -> bool:
+        r = subprocess.run(["systemctl", "is-active", SYSTEMD_UNIT], capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() == "active"
+
     async def start_proxy(self) -> dict:
-        if self.singbox_process and self.singbox_process.poll() is None:
+        settings = load_settings()
+        tun = settings["tun_mode"]
+
+        if tun and self._is_service_active():
+            return {"error": "Proxy is already running"}
+        if not tun and self.singbox_process and self.singbox_process.poll() is None:
             return {"error": "Proxy is already running"}
 
-        settings = load_settings()
         profiles = load_profiles()
         idx = settings["active_profile"]
 
@@ -266,7 +298,7 @@ class Plugin:
         config = build_singbox_config(
             profile,
             listen_port=settings["listen_port"],
-            tun_mode=settings["tun_mode"],
+            tun_mode=tun,
         )
 
         os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -277,54 +309,67 @@ class Plugin:
             return {"error": "sing-box binary not found. Run install script first."}
 
         try:
-            if settings["tun_mode"]:
+            if tun:
                 subprocess.run(["modprobe", "tun"], capture_output=True, timeout=5)
-                cmd = ["sudo", "-n", SINGBOX_BIN, "run", "-c", CONFIG_PATH]
+                with open(LOG_PATH, "w") as f:
+                    f.write("")
+                self._install_systemd_unit()
+                r = subprocess.run(
+                    ["systemctl", "start", SYSTEMD_UNIT],
+                    capture_output=True, text=True, timeout=10,
+                )
+                await asyncio.sleep(1)
+                if not self._is_service_active():
+                    with open(LOG_PATH, "r") as f:
+                        log = f.read()
+                    return {"error": f"sing-box exited: {log[:500]}"}
+                decky.logger.info("sing-box started via systemd (TUN)")
+                return {"ok": True}
             else:
                 cmd = [SINGBOX_BIN, "run", "-c", CONFIG_PATH]
-            self.log_file = open(LOG_PATH, "w")
-            self.singbox_process = subprocess.Popen(
-                cmd,
-                stdout=self.log_file,
-                stderr=self.log_file,
-            )
-            await asyncio.sleep(1)
-            if self.singbox_process.poll() is not None:
-                self.log_file.close()
-                with open(LOG_PATH, "r") as f:
-                    stderr = f.read()
-                return {"error": f"sing-box exited immediately: {stderr[:500]}"}
-            decky.logger.info(f"sing-box started, pid={self.singbox_process.pid}")
-            return {"ok": True, "pid": self.singbox_process.pid}
+                self.log_file = open(LOG_PATH, "w")
+                self.singbox_process = subprocess.Popen(
+                    cmd,
+                    stdout=self.log_file,
+                    stderr=self.log_file,
+                )
+                await asyncio.sleep(1)
+                if self.singbox_process.poll() is not None:
+                    self.log_file.close()
+                    with open(LOG_PATH, "r") as f:
+                        log = f.read()
+                    return {"error": f"sing-box exited immediately: {log[:500]}"}
+                decky.logger.info(f"sing-box started, pid={self.singbox_process.pid}")
+                return {"ok": True, "pid": self.singbox_process.pid}
         except Exception as e:
             return {"error": str(e)}
 
     async def stop_proxy(self) -> dict:
-        if not self.singbox_process or self.singbox_process.poll() is not None:
-            self.singbox_process = None
-            return {"ok": True, "was_running": False}
+        stopped_service = False
+        if self._is_service_active():
+            subprocess.run(["systemctl", "stop", SYSTEMD_UNIT], capture_output=True, timeout=10)
+            stopped_service = True
+            decky.logger.info("sing-box systemd service stopped")
 
-        try:
-            pid = self.singbox_process.pid
+        if self.singbox_process and self.singbox_process.poll() is None:
             try:
                 self.singbox_process.terminate()
                 self.singbox_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                subprocess.run(["sudo", "-n", "kill", "-9", str(pid)], capture_output=True, timeout=3)
-                subprocess.run(["pkill", "-9", "-f", "sing-box run"], capture_output=True, timeout=3)
+                self.singbox_process.kill()
                 try:
                     self.singbox_process.wait(timeout=3)
                 except Exception:
                     pass
-            decky.logger.info("sing-box stopped")
-        except Exception as e:
-            decky.logger.error(f"Error stopping sing-box: {e}")
-        finally:
-            self.singbox_process = None
-            if hasattr(self, "log_file") and self.log_file and not self.log_file.closed:
-                self.log_file.close()
+            decky.logger.info("sing-box process stopped")
 
-        return {"ok": True, "was_running": True}
+        self.singbox_process = None
+        if hasattr(self, "log_file") and self.log_file and not self.log_file.closed:
+            self.log_file.close()
+
+        subprocess.run(["pkill", "-f", "sing-box run"], capture_output=True, timeout=3)
+
+        return {"ok": True, "was_running": stopped_service or True}
 
     async def restart_proxy(self) -> dict:
         await self.stop_proxy()
@@ -347,23 +392,13 @@ class Plugin:
             return {"logs": f"Error reading logs: {e}"}
 
     async def setup_tun_permissions(self) -> dict:
-        """Create sudoers entry so sing-box can run as root without password for TUN mode."""
-        sudoers_line = f"deck ALL=(root) NOPASSWD: {SINGBOX_BIN}\n"
-        sudoers_path = "/etc/sudoers.d/deckbox"
+        """Load TUN kernel module and install systemd unit."""
         try:
-            with open(sudoers_path, "w") as f:
-                f.write(sudoers_line)
-            os.chmod(sudoers_path, 0o440)
             subprocess.run(["modprobe", "tun"], capture_output=True, timeout=5)
+            self._install_systemd_unit()
             return {"ok": True}
         except Exception as e:
             return {"error": str(e)}
-
-    async def check_tun_permissions(self) -> dict:
-        sudoers_path = "/etc/sudoers.d/deckbox"
-        exists = os.path.isfile(sudoers_path)
-        tun_loaded = os.path.exists("/dev/net/tun")
-        return {"sudoers": exists, "tun_device": tun_loaded}
 
     async def check_binary(self) -> dict:
         exists = os.path.isfile(SINGBOX_BIN)
