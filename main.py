@@ -70,7 +70,7 @@ def build_singbox_config(profile: dict, listen_port: int = 2080, tun_mode: bool 
         inbounds.append({
             "type": "tun",
             "tag": "tun-in",
-            "inet4_address": "172.19.0.1/30",
+            "address": ["172.19.0.1/30"],
             "auto_route": True,
             "strict_route": True,
             "stack": "system",
