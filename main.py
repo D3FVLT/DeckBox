@@ -14,7 +14,6 @@ CONFIG_PATH = os.path.join(CONFIG_DIR, "sing-box-config.json")
 PROFILES_PATH = os.path.join(CONFIG_DIR, "profiles.json")
 LOG_PATH = os.path.join(CONFIG_DIR, "sing-box.log")
 SYSTEMD_UNIT = "deckbox-tun.service"
-SYSTEMD_UNIT_PATH = f"/etc/systemd/system/{SYSTEMD_UNIT}"
 
 
 def parse_vless_uri(uri: str) -> dict:
@@ -254,30 +253,15 @@ class Plugin:
             "active_profile": settings["active_profile"],
         }
 
-    def _install_systemd_unit(self):
-        unit_content = f"""[Unit]
-Description=DeckBox sing-box TUN proxy
-After=network.target
-
-[Service]
-Type=simple
-User=root
-ExecStart={SINGBOX_BIN} run -c {CONFIG_PATH}
-StandardOutput=append:{LOG_PATH}
-StandardError=append:{LOG_PATH}
-Restart=no
-KillMode=process
-
-[Install]
-WantedBy=multi-user.target
-"""
-        with open(SYSTEMD_UNIT_PATH, "w") as f:
-            f.write(unit_content)
-        subprocess.run(["systemctl", "daemon-reload"], capture_output=True, timeout=10)
-
     def _is_service_active(self) -> bool:
-        r = subprocess.run(["systemctl", "is-active", SYSTEMD_UNIT], capture_output=True, text=True, timeout=5)
-        return r.stdout.strip() == "active"
+        try:
+            r = subprocess.run(
+                ["sudo", "-n", "systemctl", "is-active", SYSTEMD_UNIT],
+                capture_output=True, text=True, timeout=5,
+            )
+            return r.stdout.strip() == "active"
+        except Exception:
+            return False
 
     async def start_proxy(self) -> dict:
         settings = load_settings()
@@ -310,14 +294,14 @@ WantedBy=multi-user.target
 
         try:
             if tun:
-                subprocess.run(["modprobe", "tun"], capture_output=True, timeout=5)
                 with open(LOG_PATH, "w") as f:
                     f.write("")
-                self._install_systemd_unit()
                 r = subprocess.run(
-                    ["systemctl", "start", SYSTEMD_UNIT],
+                    ["sudo", "-n", "systemctl", "start", SYSTEMD_UNIT],
                     capture_output=True, text=True, timeout=10,
                 )
+                if r.returncode != 0:
+                    return {"error": f"Failed to start service: {r.stderr[:300]}"}
                 await asyncio.sleep(1)
                 if not self._is_service_active():
                     with open(LOG_PATH, "r") as f:
@@ -347,7 +331,7 @@ WantedBy=multi-user.target
     async def stop_proxy(self) -> dict:
         stopped_service = False
         if self._is_service_active():
-            subprocess.run(["systemctl", "stop", SYSTEMD_UNIT], capture_output=True, timeout=10)
+            subprocess.run(["sudo", "-n", "systemctl", "stop", SYSTEMD_UNIT], capture_output=True, timeout=10)
             stopped_service = True
             decky.logger.info("sing-box systemd service stopped")
 
@@ -392,10 +376,15 @@ WantedBy=multi-user.target
             return {"logs": f"Error reading logs: {e}"}
 
     async def setup_tun_permissions(self) -> dict:
-        """Load TUN kernel module and install systemd unit."""
+        """Check if TUN mode is properly set up by install.sh."""
         try:
-            subprocess.run(["modprobe", "tun"], capture_output=True, timeout=5)
-            self._install_systemd_unit()
+            tun_exists = os.path.exists("/dev/net/tun")
+            svc_exists = os.path.isfile("/etc/systemd/system/deckbox-tun.service")
+            sudoers_exists = os.path.isfile("/etc/sudoers.d/deckbox")
+            if not svc_exists or not sudoers_exists:
+                return {"error": "TUN not configured. Re-run install.sh in Konsole."}
+            if not tun_exists:
+                return {"error": "TUN device missing. Run: sudo modprobe tun"}
             return {"ok": True}
         except Exception as e:
             return {"error": str(e)}
@@ -445,10 +434,6 @@ WantedBy=multi-user.target
                 return {"error": f"Extract failed: {stderr_data.decode()[:300]}"}
 
             os.chmod(SINGBOX_BIN, 0o755)
-            subprocess.run(
-                ["setcap", "cap_net_admin,cap_net_bind_service,cap_net_raw+ep", SINGBOX_BIN],
-                capture_output=True, timeout=5,
-            )
             if os.path.exists(tar_path):
                 os.remove(tar_path)
 

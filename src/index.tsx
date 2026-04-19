@@ -352,13 +352,13 @@ function Content() {
               onClick={async () => {
                 const result = await setupTunPermissions();
                 if (result.error) {
-                  toaster.toast({ title: "DeckBox", body: `Error: ${result.error}` });
+                  toaster.toast({ title: "DeckBox", body: result.error });
                 } else {
-                  toaster.toast({ title: "DeckBox", body: "TUN permissions configured" });
+                  toaster.toast({ title: "DeckBox", body: "TUN mode ready" });
                 }
               }}
             >
-              Setup TUN Permissions
+              Check TUN Setup
             </ButtonItem>
           </PanelSectionRow>
         )}
