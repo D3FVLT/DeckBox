@@ -199,6 +199,31 @@ def save_settings(settings: dict):
 
 class Plugin:
     singbox_process: subprocess.Popen | None = None
+    _sudo_password: str | None = None
+
+    async def set_sudo_password(self, password: str) -> dict:
+        """Store sudo password in memory (never written to disk)."""
+        r = subprocess.run(
+            ["sudo", "-S", "-k", "true"],
+            input=password + "\n",
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return {"error": "Wrong password"}
+        self._sudo_password = password
+        decky.logger.info("Sudo password set (valid)")
+        return {"ok": True}
+
+    async def get_sudo_status(self) -> dict:
+        """Check if sudo password is stored and still valid."""
+        if not self._sudo_password:
+            return {"has_password": False}
+        r = subprocess.run(
+            ["sudo", "-S", "-k", "true"],
+            input=self._sudo_password + "\n",
+            capture_output=True, text=True, timeout=5,
+        )
+        return {"has_password": True, "valid": r.returncode == 0}
 
     async def get_profiles(self) -> list:
         return load_profiles()
@@ -254,14 +279,28 @@ class Plugin:
         }
 
     def _run_systemctl(self, action: str) -> subprocess.CompletedProcess:
-        """Run systemctl action, trying direct first (if root), then sudo -n."""
-        cmd_direct = ["systemctl", action, SYSTEMD_UNIT]
-        cmd_sudo = ["sudo", "-n", "systemctl", action, SYSTEMD_UNIT]
+        """Run systemctl action: direct if root, sudo -S with password, or sudo -n."""
+        cmd = ["systemctl", action, SYSTEMD_UNIT]
         if os.geteuid() == 0:
-            r = subprocess.run(cmd_direct, capture_output=True, text=True, timeout=10)
-            if r.returncode == 0 or "password" not in r.stderr.lower():
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
                 return r
-        return subprocess.run(cmd_sudo, capture_output=True, text=True, timeout=10)
+        if self._sudo_password:
+            r = subprocess.run(
+                ["sudo", "-S"] + cmd,
+                input=self._sudo_password + "\n",
+                capture_output=True, text=True, timeout=10,
+            )
+            # Filter sudo password prompt from stderr
+            r.stderr = "\n".join(
+                l for l in r.stderr.splitlines()
+                if not l.startswith("[sudo]") and "password" not in l.lower()
+            )
+            return r
+        return subprocess.run(
+            ["sudo", "-n"] + cmd,
+            capture_output=True, text=True, timeout=10,
+        )
 
     def _is_service_active(self) -> bool:
         try:
@@ -301,6 +340,8 @@ class Plugin:
 
         try:
             if tun:
+                if os.geteuid() != 0 and not self._sudo_password:
+                    return {"error": "Enter sudo password in Settings to use TUN mode."}
                 with open(LOG_PATH, "w") as f:
                     f.write(f"[DeckBox] uid={os.getuid()} euid={os.geteuid()}\n")
                     f.write(f"[DeckBox] Starting TUN mode via systemd...\n")

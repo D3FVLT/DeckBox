@@ -51,9 +51,8 @@ const stopProxy = callable<[], { ok?: boolean }>("stop_proxy");
 const checkBinary = callable<[], { exists: boolean; version: string }>("check_binary");
 const installSingbox = callable<[], { exists?: boolean; version?: string; error?: string }>("install_singbox");
 const getLogs = callable<[lines: number], { logs: string }>("get_logs");
-const setupTunPermissions = callable<[], { ok?: boolean; error?: string }>("setup_tun_permissions");
-// @ts-ignore reserved for future use
-const _checkTunPermissions = callable<[], { sudoers: boolean; tun_device: boolean }>("check_tun_permissions");
+const setSudoPassword = callable<[password: string], { ok?: boolean; error?: string }>("set_sudo_password");
+const getSudoStatus = callable<[], { has_password: boolean; valid?: boolean }>("get_sudo_status");
 
 function StatusBadge({ running }: { running: boolean }) {
   return (
@@ -159,6 +158,60 @@ const LogsModal: FC<{ closeModal?: () => void }> = ({ closeModal }) => {
   );
 };
 
+const PasswordModal: FC<{ closeModal?: () => void; onSuccess: () => void }> = ({ closeModal, onSuccess }) => {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!password) return;
+    setChecking(true);
+    setError("");
+    const result = await setSudoPassword(password);
+    setChecking(false);
+    if (result.error) {
+      setError(result.error);
+    } else {
+      onSuccess();
+      closeModal?.();
+    }
+  };
+
+  return (
+    <ModalRoot closeModal={closeModal}>
+      <div style={{ padding: "16px", minWidth: 400 }}>
+        <h3 style={{ marginBottom: 8 }}>Sudo Password</h3>
+        <p style={{ fontSize: 12, color: "#aaa", marginBottom: 12 }}>
+          TUN mode needs root access. Enter your Steam Deck password (set via passwd in Konsole).
+          Password is stored in memory only — never saved to disk.
+        </p>
+        <TextField
+          label="Password"
+          value={password}
+          bIsPassword={true}
+          onChange={(e) => setPassword(e.target.value)}
+          focusOnMount={true}
+        />
+        {error && (
+          <p style={{ color: "#f44336", fontSize: 12, marginTop: 4 }}>{error}</p>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <DialogButton onClick={closeModal} style={{ minWidth: 100 }}>
+            Cancel
+          </DialogButton>
+          <DialogButton
+            onClick={handleSubmit}
+            disabled={!password || checking}
+            style={{ minWidth: 100 }}
+          >
+            {checking ? "Checking..." : "OK"}
+          </DialogButton>
+        </div>
+      </div>
+    </ModalRoot>
+  );
+};
+
 function Content() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [settings, setSettingsState] = useState<Settings>({
@@ -178,18 +231,21 @@ function Content() {
   });
   const [loading, setLoading] = useState(false);
   const [installing, setInstalling] = useState(false);
+  const [sudoReady, setSudoReady] = useState(false);
 
   const refresh = async () => {
-    const [p, s, st, b] = await Promise.all([
+    const [p, s, st, b, sudo] = await Promise.all([
       getProfiles(),
       getSettings(),
       getStatus(),
       checkBinary(),
+      getSudoStatus(),
     ]);
     setProfiles(p);
     setSettingsState(s);
     setStatus(st);
     setBinaryInfo(b);
+    setSudoReady(sudo.has_password && sudo.valid === true);
   };
 
   useEffect(() => {
@@ -346,21 +402,28 @@ function Content() {
           />
         </PanelSectionRow>
         {settings.tun_mode && (
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              onClick={async () => {
-                const result = await setupTunPermissions();
-                if (result.error) {
-                  toaster.toast({ title: "DeckBox", body: result.error });
-                } else {
-                  toaster.toast({ title: "DeckBox", body: "TUN mode ready" });
-                }
-              }}
-            >
-              Check TUN Setup
-            </ButtonItem>
-          </PanelSectionRow>
+          <>
+            <PanelSectionRow>
+              <Focusable style={{ padding: "4px 0", fontSize: 13 }}>
+                {sudoReady
+                  ? "🔑 Password set"
+                  : "⚠️ Sudo password required"}
+              </Focusable>
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ButtonItem
+                layout="below"
+                onClick={() => showModal(
+                  <PasswordModal onSuccess={() => {
+                    setSudoReady(true);
+                    toaster.toast({ title: "DeckBox", body: "Password saved for this session" });
+                  }} />
+                )}
+              >
+                {sudoReady ? "Change Password" : "Enter Sudo Password"}
+              </ButtonItem>
+            </PanelSectionRow>
+          </>
         )}
       </PanelSection>
 
